@@ -55,6 +55,14 @@ func (r *Client) RemoveSnapshots(vmRef ref.Ref, precopies []planapi.Precopy, hos
 	return
 }
 
+func (r *Client) RemoveSnapshot(vmRef ref.Ref, snapshot string, hostsFunc util.HostsFunc) (err error) {
+	return
+}
+
+func (r *Client) StoreSnapshotChangeIDs(vmRef ref.Ref, precopies []planapi.Precopy, datavolumes []cdi.DataVolume, hostsFunc util.HostsFunc) (s string, err error) {
+	return
+}
+
 // Check if a snapshot is ready to transfer, to avoid importer restarts.
 func (r *Client) CheckSnapshotReady(vmRef ref.Ref, snapshot string) (ready bool, err error) {
 	return

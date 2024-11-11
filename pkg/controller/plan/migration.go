@@ -78,6 +78,7 @@ const (
 	WaitForInitialSnapshot   = "WaitForInitialSnapshot"
 	WaitForFinalSnapshot     = "WaitForFinalSnapshot"
 	ConvertOpenstackSnapshot = "ConvertOpenstackSnapshot"
+	StoreSnapshotChangeIDs   = "StoreSnapshotChangeIDs"
 )
 
 // Steps.
@@ -130,6 +131,7 @@ var (
 			{Name: CopyingPaused},
 			{Name: CreateSnapshot},
 			{Name: WaitForSnapshot},
+			{Name: StoreSnapshotChangeIDs},
 			{Name: AddCheckpoint},
 			{Name: StorePowerState},
 			{Name: PowerOffSource},
@@ -645,7 +647,7 @@ func (r *Migration) step(vm *plan.VMStatus) (step string) {
 		step = Initialize
 	case AllocateDisks:
 		step = DiskAllocation
-	case CopyDisks, CopyingPaused, CreateSnapshot, WaitForSnapshot, AddCheckpoint, ConvertOpenstackSnapshot:
+	case CopyDisks, CopyingPaused, CreateSnapshot, WaitForSnapshot, AddCheckpoint, ConvertOpenstackSnapshot, StoreSnapshotChangeIDs:
 		step = DiskTransfer
 	case CreateFinalSnapshot, WaitForFinalSnapshot, AddFinalCheckpoint, Finalize:
 		step = Cutover
@@ -978,6 +980,17 @@ func (r *Migration) execute(vm *plan.VMStatus) (err error) {
 			vm.AddError(fmt.Sprintf("Step '%s' not found", r.step(vm)))
 			break
 		}
+		switch vm.Phase {
+		case CreateSnapshot, CreateFinalSnapshot:
+			n := len(vm.Warm.Precopies)
+			err = r.provider.RemoveSnapshot(vm.Ref, vm.Warm.Precopies[n-1].Snapshot, r.kubevirt.loadHosts)
+			if err != nil {
+				step.AddError(err.Error())
+				err = nil
+				break
+			}
+		default:
+		}
 		var snapshot string
 		if snapshot, err = r.provider.CreateSnapshot(vm.Ref, r.kubevirt.loadHosts); err != nil {
 			if errors.As(err, &web.ProviderNotReadyError{}) || errors.As(err, &web.ConflictError{}) {
@@ -1008,6 +1021,33 @@ func (r *Migration) execute(vm *plan.VMStatus) (err error) {
 		if ready {
 			vm.Phase = r.next(vm.Phase)
 		}
+	case StoreSnapshotChangeIDs:
+		step, found := vm.FindStep(r.step(vm))
+		if !found {
+			vm.AddError(fmt.Sprintf("Step '%s' not found", r.step(vm)))
+			break
+		}
+		var disks []ExtendedDataVolume
+		disks, err = r.kubevirt.getDVs(vm)
+		if err != nil {
+			step.AddError(err.Error())
+			err = nil
+			break
+		}
+		dvs := make([]cdi.DataVolume, 0)
+		for _, disk := range disks {
+			dvs = append(dvs, *disk.DataVolume)
+		}
+		var id string
+		id, err = r.provider.StoreSnapshotChangeIDs(vm.Ref, vm.Warm.Precopies, dvs, r.kubevirt.loadHosts)
+		if err != nil {
+			step.AddError(err.Error())
+			err = nil
+			break
+		}
+		n := len(vm.Warm.Precopies)
+		vm.Warm.Precopies[n-1].Snapshot = id
+		vm.Phase = r.next(vm.Phase)
 	case AddCheckpoint, AddFinalCheckpoint:
 		step, found := vm.FindStep(r.step(vm))
 		if !found {

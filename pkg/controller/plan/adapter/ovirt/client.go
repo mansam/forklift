@@ -39,6 +39,14 @@ type Client struct {
 	connection *ovirtsdk.Connection
 }
 
+func (r *Client) RemoveSnapshot(vmRef ref.Ref, snapshot string, hostsFunc util.HostsFunc) (err error) {
+	return
+}
+
+func (r *Client) StoreSnapshotChangeIDs(vmRef ref.Ref, precopies []planapi.Precopy, datavolumes []cdi.DataVolume, hostsFunc util.HostsFunc) (s string, err error) {
+	return
+}
+
 // Create a VM snapshot and return its ID.
 func (r *Client) CreateSnapshot(vmRef ref.Ref, hostsFunc util.HostsFunc) (snapshot string, err error) {
 	_, vmService, err := r.getVM(vmRef)

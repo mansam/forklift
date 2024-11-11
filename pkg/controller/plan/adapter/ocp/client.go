@@ -24,6 +24,14 @@ type Client struct {
 	sourceClient k8sclient.Client
 }
 
+func (r *Client) RemoveSnapshot(vmRef ref.Ref, snapshot string, hostsFunc util.HostsFunc) (err error) {
+	return
+}
+
+func (r *Client) StoreSnapshotChangeIDs(vmRef ref.Ref, precopies []planapi.Precopy, datavolumes []cdi.DataVolume, hostsFunc util.HostsFunc) (s string, err error) {
+	return
+}
+
 // CheckSnapshotReady implements base.Client
 func (r *Client) CheckSnapshotReady(vmRef ref.Ref, snapshot string) (bool, error) {
 	return false, nil

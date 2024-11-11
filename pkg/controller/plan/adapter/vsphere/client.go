@@ -5,6 +5,7 @@ import (
 	"fmt"
 	liburl "net/url"
 	"strconv"
+	"strings"
 
 	"github.com/konveyor/forklift-controller/pkg/apis/forklift/v1beta1"
 	planapi "github.com/konveyor/forklift-controller/pkg/apis/forklift/v1beta1/plan"
@@ -67,6 +68,15 @@ func (r *Client) CheckSnapshotReady(vmRef ref.Ref, snapshot string) (ready bool,
 	return true, nil
 }
 
+func (r *Client) RemoveSnapshot(vmRef ref.Ref, snapshot string, hosts util.HostsFunc) (err error) {
+	r.Log.V(1).Info("RemoveSnapshot",
+		"vmRef", vmRef,
+		"snapshot", snapshot,
+		"incremental", settings.Settings.VsphereIncrementalBackup)
+	err = r.removeSnapshot(vmRef, snapshot, false, hosts)
+	return
+}
+
 // Remove all warm migration snapshots.
 func (r *Client) RemoveSnapshots(vmRef ref.Ref, precopies []planapi.Precopy, hosts util.HostsFunc) (err error) {
 
@@ -85,6 +95,45 @@ func (r *Client) RemoveSnapshots(vmRef ref.Ref, precopies []planapi.Precopy, hos
 	} else {
 		rootSnapshot := precopies[0].Snapshot
 		err = r.removeSnapshot(vmRef, rootSnapshot, true, hosts)
+	}
+	return
+}
+
+func (r *Client) StoreSnapshotChangeIDs(vmRef ref.Ref, precopies []planapi.Precopy, datavolumes []cdi.DataVolume, hosts util.HostsFunc) (id string, err error) {
+	n := len(precopies)
+	snapshot := precopies[n-1].Snapshot
+	id = fmt.Sprintf("%s", snapshot)
+	if settings.Settings.VsphereIncrementalBackup {
+		var changeIds map[string]string
+		if err != nil {
+			return
+		}
+		changeIds, err = r.getChangeIds(vmRef, snapshot, hosts)
+		for _, dv := range datavolumes {
+			changeId := changeIds[dv.Spec.Source.VDDK.BackingFile]
+			id += fmt.Sprintf(":%s#%s", dv.Spec.Source.VDDK.BackingFile, changeId)
+		}
+	}
+	return
+}
+
+func (r *Client) snapshotId(snapshot string) (id string) {
+	sections := strings.Split(snapshot, ":")
+	id = sections[0]
+	return
+}
+
+func (r *Client) parseChangeIds(snapshot string) (ids map[string]string, ok bool) {
+	ids = make(map[string]string)
+
+	sections := strings.Split(snapshot, ":")
+	if len(sections) < 2 {
+		return
+	}
+
+	for _, section := range sections[1:] {
+		s := strings.Split(section, "#")
+		ids[s[0]] = s[1]
 	}
 	return
 }
@@ -108,9 +157,12 @@ func (r *Client) SetCheckpoints(vmRef ref.Ref, precopies []planapi.Precopy, data
 
 	if settings.Settings.VsphereIncrementalBackup && previous != "" {
 		var changeIds map[string]string
-		changeIds, err = r.getChangeIds(vmRef, previous, hosts)
-		if err != nil {
-			return
+		changeIds, ok := r.parseChangeIds(previous)
+		if !ok {
+			changeIds, err = r.getChangeIds(vmRef, previous, hosts)
+			if err != nil {
+				return
+			}
 		}
 		for i := range datavolumes {
 			dv := &datavolumes[i]
@@ -410,7 +462,7 @@ func (r *Client) removeSnapshot(vmRef ref.Ref, snapshot string, children bool, h
 	if err != nil {
 		return
 	}
-	_, err = vm.RemoveSnapshot(context.TODO(), snapshot, children, nil)
+	_, err = vm.RemoveSnapshot(context.TODO(), r.snapshotId(snapshot), children, nil)
 	if err != nil {
 		err = liberr.Wrap(err)
 		return
