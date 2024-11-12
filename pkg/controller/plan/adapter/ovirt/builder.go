@@ -122,6 +122,10 @@ type Builder struct {
 	macConflictsMap map[string]string
 }
 
+func (r *Builder) GetUniqueDiskIdentifiers(vmRef ref.Ref) (ids []string, err error) {
+	return
+}
+
 // Get list of destination VMs with mac addresses that would
 // conflict with this VM, if any exist.
 func (r *Builder) macConflicts(vm *model.Workload) (conflictingVMs []string, err error) {

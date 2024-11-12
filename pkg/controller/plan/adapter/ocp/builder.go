@@ -64,6 +64,10 @@ func (r *Builder) ConfigMap(vmRef ref.Ref, secret *core.Secret, object *core.Con
 	return nil
 }
 
+func (r *Builder) GetUniqueDiskIdentifiers(vmRef ref.Ref) (ids []string, err error) {
+	return
+}
+
 // DataVolumes implements base.Builder
 func (r *Builder) DataVolumes(vmRef ref.Ref, secret *core.Secret, configMap *core.ConfigMap, dvTemplate *cdi.DataVolume) (dvs []cdi.DataVolume, err error) {
 	vmExport := &export.VirtualMachineExport{}

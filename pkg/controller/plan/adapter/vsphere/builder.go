@@ -390,6 +390,20 @@ func (r *Builder) Secret(vmRef ref.Ref, in, object *core.Secret) (err error) {
 	return
 }
 
+func (r *Builder) GetUniqueDiskIdentifiers(vmRef ref.Ref) (ids []string, err error) {
+	vm := &model.VM{}
+	err = r.Source.Inventory.Find(vm, vmRef)
+	if err != nil {
+		err = liberr.Wrap(err, "vm", vmRef.String())
+		return
+	}
+
+	for _, disk := range vm.Disks {
+		ids = append(ids, r.baseVolume(disk.File))
+	}
+	return
+}
+
 // Create DataVolume specs for the VM.
 func (r *Builder) DataVolumes(vmRef ref.Ref, secret *core.Secret, _ *core.ConfigMap, dvTemplate *cdi.DataVolume) (dvs []cdi.DataVolume, err error) {
 	vm := &model.VM{}

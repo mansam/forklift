@@ -113,6 +113,10 @@ type KubeVirt struct {
 	Builder adapter.Builder
 }
 
+func (r *KubeVirt) UniqueDiskIdentifiers(vm *plan.VMStatus) ([]string, error) {
+	return r.Builder.GetUniqueDiskIdentifiers(vm.Ref)
+}
+
 // Build a VirtualMachineMap.
 func (r *KubeVirt) VirtualMachineMap() (mp VirtualMachineMap, err error) {
 	list, err := r.ListVMs()

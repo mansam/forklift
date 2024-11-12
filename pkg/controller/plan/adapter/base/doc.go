@@ -90,6 +90,8 @@ type Builder interface {
 	GetPopulatorTaskName(pvc *core.PersistentVolumeClaim) (taskName string, err error)
 	// Get the virtual machine preference name
 	PreferenceName(vmRef ref.Ref, configMap *core.ConfigMap) (name string, err error)
+	//
+	GetUniqueDiskIdentifiers(vmRef ref.Ref) (ids []string, err error)
 }
 
 // Client API.
@@ -122,7 +124,7 @@ type Client interface {
 	// Actions on source env needed before running the populator pods
 	PreTransferActions(vmRef ref.Ref) (ready bool, err error)
 	// StoreSnapshotChangeIDs
-	StoreSnapshotChangeIDs(vmRef ref.Ref, precopies []planapi.Precopy, datavolumes []cdi.DataVolume, hostsFunc util.HostsFunc) (string, error)
+	StoreSnapshotChangeIDs(vmRef ref.Ref, precopies []planapi.Precopy, disks []string, hostsFunc util.HostsFunc) (string, error)
 }
 
 // Validator API.

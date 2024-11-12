@@ -59,7 +59,7 @@ func (r *Client) RemoveSnapshot(vmRef ref.Ref, snapshot string, hostsFunc util.H
 	return
 }
 
-func (r *Client) StoreSnapshotChangeIDs(vmRef ref.Ref, precopies []planapi.Precopy, datavolumes []cdi.DataVolume, hostsFunc util.HostsFunc) (s string, err error) {
+func (r *Client) StoreSnapshotChangeIDs(vmRef ref.Ref, precopies []planapi.Precopy, disks []string, hostsFunc util.HostsFunc) (s string, err error) {
 	return
 }
 

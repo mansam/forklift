@@ -258,6 +258,10 @@ var DefaultProperties = map[string]string{
 	HwRngModel:      HwRngModelVirtio,
 }
 
+func (r *Builder) GetUniqueDiskIdentifiers(vmRef ref.Ref) (ids []string, err error) {
+	return
+}
+
 // Create the destination Kubevirt VM.
 func (r *Builder) VirtualMachine(vmRef ref.Ref, vmSpec *cnv.VirtualMachineSpec, persistentVolumeClaims []*core.PersistentVolumeClaim, usesInstanceType bool) (err error) {
 	vm := &model.Workload{}

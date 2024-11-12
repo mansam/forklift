@@ -53,32 +53,33 @@ var (
 
 // Phases.
 const (
-	Started                  = "Started"
-	PreHook                  = "PreHook"
-	StorePowerState          = "StorePowerState"
-	PowerOffSource           = "PowerOffSource"
-	WaitForPowerOff          = "WaitForPowerOff"
-	CreateDataVolumes        = "CreateDataVolumes"
-	CreateVM                 = "CreateVM"
-	CopyDisks                = "CopyDisks"
-	AllocateDisks            = "AllocateDisks"
-	CopyingPaused            = "CopyingPaused"
-	AddCheckpoint            = "AddCheckpoint"
-	AddFinalCheckpoint       = "AddFinalCheckpoint"
-	CreateSnapshot           = "CreateSnapshot"
-	CreateInitialSnapshot    = "CreateInitialSnapshot"
-	CreateFinalSnapshot      = "CreateFinalSnapshot"
-	Finalize                 = "Finalize"
-	CreateGuestConversionPod = "CreateGuestConversionPod"
-	ConvertGuest             = "ConvertGuest"
-	CopyDisksVirtV2V         = "CopyDisksVirtV2V"
-	PostHook                 = "PostHook"
-	Completed                = "Completed"
-	WaitForSnapshot          = "WaitForSnapshot"
-	WaitForInitialSnapshot   = "WaitForInitialSnapshot"
-	WaitForFinalSnapshot     = "WaitForFinalSnapshot"
-	ConvertOpenstackSnapshot = "ConvertOpenstackSnapshot"
-	StoreSnapshotChangeIDs   = "StoreSnapshotChangeIDs"
+	Started                       = "Started"
+	PreHook                       = "PreHook"
+	StorePowerState               = "StorePowerState"
+	PowerOffSource                = "PowerOffSource"
+	WaitForPowerOff               = "WaitForPowerOff"
+	CreateDataVolumes             = "CreateDataVolumes"
+	CreateVM                      = "CreateVM"
+	CopyDisks                     = "CopyDisks"
+	AllocateDisks                 = "AllocateDisks"
+	CopyingPaused                 = "CopyingPaused"
+	AddCheckpoint                 = "AddCheckpoint"
+	AddFinalCheckpoint            = "AddFinalCheckpoint"
+	CreateSnapshot                = "CreateSnapshot"
+	CreateInitialSnapshot         = "CreateInitialSnapshot"
+	CreateFinalSnapshot           = "CreateFinalSnapshot"
+	Finalize                      = "Finalize"
+	CreateGuestConversionPod      = "CreateGuestConversionPod"
+	ConvertGuest                  = "ConvertGuest"
+	CopyDisksVirtV2V              = "CopyDisksVirtV2V"
+	PostHook                      = "PostHook"
+	Completed                     = "Completed"
+	WaitForSnapshot               = "WaitForSnapshot"
+	WaitForInitialSnapshot        = "WaitForInitialSnapshot"
+	WaitForFinalSnapshot          = "WaitForFinalSnapshot"
+	ConvertOpenstackSnapshot      = "ConvertOpenstackSnapshot"
+	StoreSnapshotChangeIDs        = "StoreSnapshotChangeIDs"
+	StoreInitialSnapshotChangeIDs = "StoreInitialSnapshotChangeIds"
 )
 
 // Steps.
@@ -126,6 +127,7 @@ var (
 			{Name: PreHook, All: HasPreHook},
 			{Name: CreateInitialSnapshot},
 			{Name: WaitForInitialSnapshot},
+			{Name: StoreInitialSnapshotChangeIDs},
 			{Name: CreateDataVolumes},
 			{Name: CopyDisks},
 			{Name: CopyingPaused},
@@ -643,7 +645,7 @@ func (r *Migration) itinerary() *libitr.Itinerary {
 // Get the name of the pipeline step corresponding to the current VM phase.
 func (r *Migration) step(vm *plan.VMStatus) (step string) {
 	switch vm.Phase {
-	case Started, CreateInitialSnapshot, WaitForInitialSnapshot, CreateDataVolumes:
+	case Started, CreateInitialSnapshot, WaitForInitialSnapshot, StoreInitialSnapshotChangeIDs, CreateDataVolumes:
 		step = Initialize
 	case AllocateDisks:
 		step = DiskAllocation
@@ -1021,25 +1023,23 @@ func (r *Migration) execute(vm *plan.VMStatus) (err error) {
 		if ready {
 			vm.Phase = r.next(vm.Phase)
 		}
-	case StoreSnapshotChangeIDs:
+	case StoreInitialSnapshotChangeIDs, StoreSnapshotChangeIDs:
 		step, found := vm.FindStep(r.step(vm))
 		if !found {
 			vm.AddError(fmt.Sprintf("Step '%s' not found", r.step(vm)))
 			break
 		}
-		var disks []ExtendedDataVolume
-		disks, err = r.kubevirt.getDVs(vm)
+
+		var disks []string
+		disks, err = r.kubevirt.UniqueDiskIdentifiers(vm)
 		if err != nil {
 			step.AddError(err.Error())
 			err = nil
 			break
 		}
-		dvs := make([]cdi.DataVolume, 0)
-		for _, disk := range disks {
-			dvs = append(dvs, *disk.DataVolume)
-		}
+
 		var id string
-		id, err = r.provider.StoreSnapshotChangeIDs(vm.Ref, vm.Warm.Precopies, dvs, r.kubevirt.loadHosts)
+		id, err = r.provider.StoreSnapshotChangeIDs(vm.Ref, vm.Warm.Precopies, disks, r.kubevirt.loadHosts)
 		if err != nil {
 			step.AddError(err.Error())
 			err = nil

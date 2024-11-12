@@ -99,7 +99,7 @@ func (r *Client) RemoveSnapshots(vmRef ref.Ref, precopies []planapi.Precopy, hos
 	return
 }
 
-func (r *Client) StoreSnapshotChangeIDs(vmRef ref.Ref, precopies []planapi.Precopy, datavolumes []cdi.DataVolume, hosts util.HostsFunc) (id string, err error) {
+func (r *Client) StoreSnapshotChangeIDs(vmRef ref.Ref, precopies []planapi.Precopy, disks []string, hosts util.HostsFunc) (id string, err error) {
 	n := len(precopies)
 	snapshot := precopies[n-1].Snapshot
 	id = fmt.Sprintf("%s", snapshot)
@@ -109,9 +109,9 @@ func (r *Client) StoreSnapshotChangeIDs(vmRef ref.Ref, precopies []planapi.Preco
 			return
 		}
 		changeIds, err = r.getChangeIds(vmRef, snapshot, hosts)
-		for _, dv := range datavolumes {
-			changeId := changeIds[dv.Spec.Source.VDDK.BackingFile]
-			id += fmt.Sprintf(":%s#%s", dv.Spec.Source.VDDK.BackingFile, changeId)
+		for _, d := range disks {
+			changeId := changeIds[d]
+			id += fmt.Sprintf(":%s#%s", d, changeId)
 		}
 	}
 	return
@@ -135,6 +135,7 @@ func (r *Client) parseChangeIds(snapshot string) (ids map[string]string, ok bool
 		s := strings.Split(section, "#")
 		ids[s[0]] = s[1]
 	}
+	ok = true
 	return
 }
 
@@ -167,20 +168,16 @@ func (r *Client) SetCheckpoints(vmRef ref.Ref, precopies []planapi.Precopy, data
 		for i := range datavolumes {
 			dv := &datavolumes[i]
 			dv.Spec.Checkpoints = append(dv.Spec.Checkpoints, cdi.DataVolumeCheckpoint{
-				Current:  current,
+				Current:  r.snapshotId(current),
 				Previous: changeIds[dv.Spec.Source.VDDK.BackingFile],
 			})
 			dv.Spec.FinalCheckpoint = final
-		}
-		err = r.removeSnapshot(vmRef, previous, false, hosts)
-		if err != nil {
-			return
 		}
 	} else {
 		for i := range datavolumes {
 			dv := &datavolumes[i]
 			dv.Spec.Checkpoints = append(dv.Spec.Checkpoints, cdi.DataVolumeCheckpoint{
-				Current:  current,
+				Current:  r.snapshotId(current),
 				Previous: previous,
 			})
 			dv.Spec.FinalCheckpoint = final
