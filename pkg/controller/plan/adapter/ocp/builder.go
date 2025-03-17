@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 
+	model "github.com/konveyor/forklift-controller/pkg/controller/provider/model/ocp"
 	liberr "github.com/konveyor/forklift-controller/pkg/lib/error"
 	libitr "github.com/konveyor/forklift-controller/pkg/lib/itinerary"
 	export "kubevirt.io/api/export/v1alpha1"
@@ -36,6 +37,9 @@ const (
 	Pod    = "pod"
 	Multus = "multus"
 )
+
+// Migration types
+const Live = "Live"
 
 type Builder struct {
 	*plancontext.Context
@@ -66,6 +70,14 @@ func (r *Builder) ConfigMap(vmRef ref.Ref, secret *core.Secret, object *core.Con
 
 // DataVolumes implements base.Builder
 func (r *Builder) DataVolumes(vmRef ref.Ref, secret *core.Secret, configMap *core.ConfigMap, dvTemplate *cdi.DataVolume) (dvs []cdi.DataVolume, err error) {
+	if r.Plan.Spec.Type == Live {
+		return r.liveDataVolumes(vmRef, dvTemplate)
+	} else {
+		return r.exportDataVolumes(vmRef, secret, configMap, dvTemplate)
+	}
+}
+
+func (r *Builder) exportDataVolumes(vmRef ref.Ref, secret *core.Secret, configMap *core.ConfigMap, dvTemplate *cdi.DataVolume) (dvs []cdi.DataVolume, err error) {
 	vmExport := &export.VirtualMachineExport{}
 	key := client.ObjectKey{
 		Namespace: vmRef.Namespace,
@@ -84,7 +96,7 @@ func (r *Builder) DataVolumes(vmRef ref.Ref, secret *core.Secret, configMap *cor
 		storageMap[storage.Source.Name] = storage.Destination
 	}
 
-	dataVolumes := []cdi.DataVolume{}
+	dvs = []cdi.DataVolume{}
 	for _, volume := range vmExport.Status.Links.External.Volumes {
 		// Get PVC
 		pvc := &core.PersistentVolumeClaim{}
@@ -102,7 +114,7 @@ func (r *Builder) DataVolumes(vmRef ref.Ref, secret *core.Secret, configMap *cor
 			return nil, liberr.Wrap(fmt.Errorf("failed to get export URL, available formats: %v", volume.Formats))
 		}
 		storageClassName := storageMap[*pvc.Spec.StorageClassName].StorageClass
-		dataVolume.Spec = *createDataVolumeSpec(size, storageClassName, url, configMap.Name, secret.Name)
+		dataVolume.Spec = *createExportDataVolumeSpec(size, storageClassName, url, configMap.Name, secret.Name)
 
 		err = r.Destination.Client.Create(context.TODO(), dataVolume, &client.CreateOptions{})
 		if err != nil {
@@ -112,10 +124,64 @@ func (r *Builder) DataVolumes(vmRef ref.Ref, secret *core.Secret, configMap *cor
 			}
 		}
 
-		dataVolumes = append(dataVolumes, *dataVolume)
+		dvs = append(dvs, *dataVolume)
+	}
+	return
+}
+
+func (r *Builder) liveDataVolumes(vmRef ref.Ref, dvTemplate *cdi.DataVolume) (dvs []cdi.DataVolume, err error) {
+	storageMap := map[string]v1beta1.DestinationStorage{}
+	for _, storage := range r.Map.Storage.Spec.Map {
+		storageMap[storage.Source.Name] = storage.Destination
 	}
 
-	return dataVolumes, nil
+	vm := &model.VM{}
+	err = r.Source.Inventory.Find(vm, vmRef)
+	if err != nil {
+		err = liberr.Wrap(err, "vm", vmRef.String())
+		return
+	}
+
+	for _, vol := range vm.Object.Spec.Template.Spec.Volumes {
+		pvc := &model.PersistentVolumeClaim{}
+		if vol.PersistentVolumeClaim != nil {
+			pvcRef := ref.Ref{Name: vol.PersistentVolumeClaim.ClaimName, Namespace: vm.Namespace}
+			err = r.Source.Inventory.Find(pvc, pvcRef)
+			if err != nil {
+				err = liberr.Wrap(err, "vm", vmRef.String(), "volume", vol.Name)
+				return
+			}
+		} else if vol.DataVolume != nil {
+			dv := &model.DataVolume{}
+			dvRef := ref.Ref{Name: vol.DataVolume.Name, Namespace: vm.Namespace}
+			err = r.Source.Inventory.Find(dv, dvRef)
+			if err != nil {
+				err = liberr.Wrap(err, "vm", vmRef.String(), "volume", vol.Name)
+				return
+			}
+			pvcRef := ref.Ref{Name: dv.Object.Status.ClaimName, Namespace: vm.Namespace}
+			err = r.Source.Inventory.Find(pvc, pvcRef)
+			if err != nil {
+				err = liberr.Wrap(err, "vm", vmRef.String(), "volume", vol.Name)
+				return
+			}
+		}
+		size := pvc.Object.Spec.Resources.Requests["storage"]
+		dataVolume := dvTemplate.DeepCopy()
+		dataVolume.Annotations[planbase.AnnDiskSource] = fmt.Sprintf("%s/%s", pvc.Namespace, pvc.Name)
+		storageClassName := storageMap[*pvc.Object.Spec.StorageClassName].StorageClass
+		dataVolume.Spec = *createBlankDataVolumeSpec(size, storageClassName)
+		err = r.Destination.Client.Create(context.TODO(), dataVolume, &client.CreateOptions{})
+		if err != nil {
+			if !k8serr.IsAlreadyExists(err) {
+				r.Log.Error(err, "Failed to create DataVolume")
+				return nil, liberr.Wrap(err)
+			}
+		}
+		dvs = append(dvs, *dataVolume)
+	}
+
+	return
 }
 
 func getExportURL(virtualMachineExportVolumeFormat []export.VirtualMachineExportVolumeFormat) (url string) {
@@ -245,8 +311,31 @@ func (r *Builder) TemplateLabels(vmRef ref.Ref) (labels map[string]string, err e
 
 // VirtualMachine implements base.Builder
 func (r *Builder) VirtualMachine(vmRef ref.Ref, object *cnv.VirtualMachineSpec, persistentVolumeClaims []*core.PersistentVolumeClaim, usesInstanceType bool) error {
+	if r.Plan.Spec.Type == Live {
+		return r.liveVm(vmRef, object, persistentVolumeClaims)
+	} else {
+		return r.exportVm(vmRef, object, persistentVolumeClaims)
+	}
+}
+
+func (r *Builder) liveVm(vmRef ref.Ref, object *cnv.VirtualMachineSpec, persistentVolumeClaims []*core.PersistentVolumeClaim) (err error) {
+	source := &model.VM{}
+	err = r.Source.Inventory.Find(source, vmRef)
+	if err != nil {
+		err = liberr.Wrap(err, "vm", vmRef.String())
+		return
+	}
+	object = source.Object.Spec.DeepCopy()
+	object.RunStrategy = nil
+	object.Running = nil
+	r.mapDisks(&source.Object, object, persistentVolumeClaims, vmRef)
+	r.mapNetworks(&source.Object, object)
+	return
+}
+
+func (r *Builder) exportVm(vmRef ref.Ref, object *cnv.VirtualMachineSpec, persistentVolumeClaims []*core.PersistentVolumeClaim) (err error) {
 	vmExport := &export.VirtualMachineExport{}
-	err := r.sourceClient.Get(context.Background(), client.ObjectKey{Namespace: vmRef.Namespace, Name: vmRef.Name}, vmExport)
+	err = r.sourceClient.Get(context.Background(), client.ObjectKey{Namespace: vmRef.Namespace, Name: vmRef.Name}, vmExport)
 	if err != nil {
 		return liberr.Wrap(err)
 	}
@@ -260,8 +349,7 @@ func (r *Builder) VirtualMachine(vmRef ref.Ref, object *cnv.VirtualMachineSpec, 
 	object.Template = targetVmSpec.Template
 	r.mapDisks(sourceVm, targetVmSpec, persistentVolumeClaims, vmRef)
 	r.mapNetworks(sourceVm, targetVmSpec)
-
-	return nil
+	return
 }
 
 func (r *Builder) mapDisks(sourceVm *cnv.VirtualMachine, targetVmSpec *cnv.VirtualMachineSpec, persistentVolumeClaims []*core.PersistentVolumeClaim, vmRef ref.Ref) {
@@ -582,7 +670,7 @@ func (r *Builder) getSourceVmFromDefinition(vme *export.VirtualMachineExport) (*
 	return nil, liberr.New("failed to find vm in manifest")
 }
 
-func createDataVolumeSpec(size resource.Quantity, storageClassName, url, configMap, secret string) *cdi.DataVolumeSpec {
+func createExportDataVolumeSpec(size resource.Quantity, storageClassName, url, configMap, secret string) *cdi.DataVolumeSpec {
 	return &cdi.DataVolumeSpec{
 		Source: &cdi.DataVolumeSource{
 			HTTP: &cdi.DataVolumeSourceHTTP{
@@ -590,6 +678,22 @@ func createDataVolumeSpec(size resource.Quantity, storageClassName, url, configM
 				CertConfigMap:      configMap,
 				SecretExtraHeaders: []string{secret},
 			},
+		},
+		Storage: &cdi.StorageSpec{
+			Resources: core.ResourceRequirements{
+				Requests: core.ResourceList{
+					core.ResourceStorage: size,
+				},
+			},
+			StorageClassName: &storageClassName,
+		},
+	}
+}
+
+func createBlankDataVolumeSpec(size resource.Quantity, storageClassName string) *cdi.DataVolumeSpec {
+	return &cdi.DataVolumeSpec{
+		Source: &cdi.DataVolumeSource{
+			Blank: &cdi.DataVolumeBlankImage{},
 		},
 		Storage: &cdi.StorageSpec{
 			Resources: core.ResourceRequirements{

@@ -2,6 +2,7 @@ package migrator
 
 import (
 	"github.com/konveyor/forklift-controller/pkg/apis/forklift/v1beta1"
+	"github.com/konveyor/forklift-controller/pkg/controller/plan"
 	plancontext "github.com/konveyor/forklift-controller/pkg/controller/plan/context"
 	"github.com/konveyor/forklift-controller/pkg/controller/plan/migrator/base"
 	"github.com/konveyor/forklift-controller/pkg/controller/plan/migrator/ocp"
@@ -9,10 +10,10 @@ import (
 
 type Migrator = base.Migrator
 
-func New(context *plancontext.Context) (migrator Migrator, err error) {
+func New(context *plancontext.Context, kubevirt plan.KubeVirt) (migrator Migrator, err error) {
 	switch context.Source.Provider.Type() {
 	case v1beta1.OpenShift:
-		migrator, err = ocp.New(context)
+		migrator, err = ocp.New(context, kubevirt)
 		return
 	default:
 		m := base.BaseMigrator{Context: context}

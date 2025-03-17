@@ -254,10 +254,6 @@ func (r *Migration) Run() (reQ time.Duration, err error) {
 
 // Get/Build resources.
 func (r *Migration) init() (err error) {
-	r.migrator, err = migrator.New(r.Context)
-	if err != nil {
-		return
-	}
 	adapter, err := adapter.New(r.Context.Source.Provider)
 	if err != nil {
 		return
@@ -277,6 +273,10 @@ func (r *Migration) init() (err error) {
 	r.kubevirt = KubeVirt{
 		Context: r.Context,
 		Builder: r.builder,
+	}
+	r.migrator, err = migrator.New(r.Context, r.kubevirt)
+	if err != nil {
+		return
 	}
 	r.scheduler, err = scheduler.New(r.Context)
 	if err != nil {
