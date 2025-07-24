@@ -14,9 +14,8 @@ import (
 	"sync"
 	"time"
 
-	liberr "github.com/konveyor/forklift-controller/pkg/lib/error"
-	"github.com/konveyor/forklift-controller/pkg/lib/logging"
-	"gopkg.in/yaml.v2"
+	liberr "github.com/kubev2v/forklift/pkg/lib/error"
+	"github.com/kubev2v/forklift/pkg/lib/logging"
 )
 
 const (
@@ -25,7 +24,11 @@ const (
 )
 
 type OVAConfig struct {
-	URLs []string `yaml:"urls"`
+	Sources []Source `yaml:"sources"`
+}
+
+type Source struct {
+	URL string `yaml:"url"`
 }
 
 func New(catalogPath string, configPath string, scanInterval int, prune bool, concurrent int) (m *Manager, err error) {
@@ -93,7 +96,8 @@ func (m *Manager) reconcile() (done bool) {
 	}
 
 	wg := NewQueuingWaitGroup(m.MaxConcurrentDownloads)
-	for _, url := range m.Config.URLs {
+	for _, source := range m.Config.Sources {
+		url := source.URL
 		if !m.present(url) {
 			wg.Add()
 			go func() {
@@ -116,24 +120,14 @@ func (m *Manager) reconcile() (done bool) {
 }
 
 func (m *Manager) config() (err error) {
-	file, err := os.Open(m.ConfigPath)
-	if err != nil {
-		return
-	}
-	defer func() {
-		_ = file.Close()
-	}()
-	decoder := yaml.NewDecoder(file)
-	err = decoder.Decode(&m.Config)
-	if err != nil {
-		return
-	}
+	m.Config, err = ReadConfig(m.ConfigPath)
 	return
 }
 
 func (m *Manager) prune() error {
 	remoteAppliances := make(map[string]bool)
-	for _, url := range m.Config.URLs {
+	for _, source := range m.Config.Sources {
+		url := source.URL
 		remoteAppliances[string2hash(url)] = true
 	}
 	entries, err := os.ReadDir(m.CatalogPath)
@@ -296,4 +290,10 @@ func string2hash(s string) string {
 	h := sha256.New()
 	_, _ = h.Write([]byte(s))
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+func complete(path string, url string) (n int, done bool) {
+	hash := string2hash(url)
+	return path.Join(m.CatalogPath, hash)
+	return
 }
