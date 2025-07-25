@@ -7,10 +7,11 @@ import (
 
 const (
 	EnvScanInterval           = "SCAN_INTERVAL"
-	EnvConfigPath             = "CONFIG_PATH"
+	EnvSourcesPath            = "SOURCES_PATH"
 	EnvCatalogPath            = "CATALOG_PATH"
 	EnvPruneCatalog           = "PRUNE_CATALOG"
 	EnvMaxConcurrentDownloads = "CONCURRENT_DOWNLOADS"
+	EnvPort                   = "PORT"
 )
 
 var Settings OVASettings
@@ -20,12 +21,14 @@ type OVASettings struct {
 	CatalogPath string
 	// Scan interval in seconds.
 	ScanInterval int
-	// Path to config file
-	ConfigPath string
+	// Path to sources file
+	SourcesPath string
 	// Prune unwanted appliances
 	Prune bool
 	// Maximum number of concurrent downloads
 	MaxConcurrentDownloads int
+	// Port to serve on
+	Port string
 }
 
 func (r *OVASettings) Load() (err error) {
@@ -36,11 +39,11 @@ func (r *OVASettings) Load() (err error) {
 	} else {
 		r.ScanInterval = 30
 	}
-	s, found = os.LookupEnv(EnvConfigPath)
+	s, found = os.LookupEnv(EnvSourcesPath)
 	if found {
-		r.ConfigPath = s
+		r.SourcesPath = s
 	} else {
-		r.ConfigPath = "/provider/settings.yaml"
+		r.SourcesPath = "/provider/sources"
 	}
 	s, found = os.LookupEnv(EnvCatalogPath)
 	if found {
@@ -58,6 +61,12 @@ func (r *OVASettings) Load() (err error) {
 		r.MaxConcurrentDownloads = n
 	} else {
 		r.MaxConcurrentDownloads = 3
+	}
+	s, found = os.LookupEnv(EnvPort)
+	if found {
+		r.Port = s
+	} else {
+		r.Port = "8080"
 	}
 	return
 }

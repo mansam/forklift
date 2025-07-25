@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -11,7 +12,7 @@ import (
 )
 
 var Settings = &settings.Settings
-var log = logging.WithName("hub")
+var log = logging.WithName("ova")
 
 func main() {
 	log.Info("Started", "settings", Settings)
@@ -34,7 +35,7 @@ func main() {
 	}
 	manager, err := catalog.New(
 		Settings.CatalogPath,
-		Settings.ConfigPath,
+		Settings.SourcesPath,
 		Settings.ScanInterval,
 		Settings.Prune,
 		Settings.MaxConcurrentDownloads,
@@ -54,7 +55,11 @@ func main() {
 	router.GET("/networks", gin.WrapF(networkHandler))
 	router.GET("/watch", gin.WrapF(watchdHandler))
 	router.GET("/test_connection", gin.WrapF(connHandler))
-	err = router.Run(":8080")
+
+	handler := catalog.Handler{Manager: manager}
+	handler.AddRoutes(router)
+
+	err = router.Run(fmt.Sprintf(":%s", Settings.Port))
 }
 
 func ErrorHandler() gin.HandlerFunc {

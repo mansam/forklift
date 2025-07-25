@@ -9,7 +9,6 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -650,7 +649,8 @@ func (um *UUIDMap) GetUUID(object interface{}, key string) string {
 		enc := gob.NewEncoder(&buf)
 
 		if err := enc.Encode(object); err != nil {
-			log.Fatal(err)
+			log.Error(err, "Failed to encode object", "object", object)
+			panic(err)
 		}
 
 		hash := sha256.Sum256(buf.Bytes())

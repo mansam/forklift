@@ -143,7 +143,7 @@ func (r *Reconciler) createPvcForNfs(provider *api.Provider, ctx context.Context
 
 func (r *Reconciler) createServerConfigMap(provider *api.Provider, ctx context.Context, ownerReference metav1.OwnerReference, labels map[string]string) (cm *core.ConfigMap, err error) {
 	configmapName := fmt.Sprintf("%s-configmap-%s-", ovaServer, provider.Name)
-	data, _ := yaml.Marshal(provider.Spec.Settings)
+	data, _ := yaml.Marshal(provider.Spec.Sources)
 	cm = &core.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName:    configmapName,
@@ -151,7 +151,7 @@ func (r *Reconciler) createServerConfigMap(provider *api.Provider, ctx context.C
 			Labels:          labels,
 			OwnerReferences: []metav1.OwnerReference{ownerReference},
 		},
-		Data: map[string]string{"settings.yaml": string(data)},
+		Data: map[string]string{"sources": string(data)},
 	}
 	err = r.Create(ctx, cm)
 	return
@@ -255,7 +255,7 @@ func (r *Reconciler) makeOvaProviderPodSpec(pvcName, cmName, providerName, provi
 				MountPath: mountPath,
 			},
 			{
-				Name:      "settings",
+				Name:      "sources",
 				MountPath: configMountPath,
 			},
 		},
@@ -281,12 +281,12 @@ func (r *Reconciler) makeOvaProviderPodSpec(pvcName, cmName, providerName, provi
 		},
 	}
 	cmVolume := core.Volume{
-		Name: "settings",
+		Name: "sources",
 		VolumeSource: core.VolumeSource{
 			ConfigMap: &core.ConfigMapVolumeSource{
 				LocalObjectReference: core.LocalObjectReference{Name: cmName},
 				Items: []core.KeyToPath{
-					{Key: "settings.yaml", Path: "settings.yaml"},
+					{Key: "sources", Path: "sources"},
 				},
 			},
 		},

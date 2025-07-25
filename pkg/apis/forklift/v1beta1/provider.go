@@ -84,6 +84,8 @@ type ProviderSpec struct {
 	Secret core.ObjectReference `json:"secret" ref:"Secret"`
 	// Provider settings.
 	Settings map[string]string `json:"settings,omitempty"`
+	// Remote sources
+	Sources []Source `json:"sources,omitempty"`
 }
 
 // ProviderStatus defines the observed state of Provider
@@ -99,6 +101,13 @@ type ProviderStatus struct {
 	// Fingerprint.
 	// +optional
 	Fingerprint string `json:"fingerprint,omitempty"`
+}
+
+// Source defines a remote VM source for the provider.
+// (Typically, an appliance URL for an OVA provider.)
+type Source struct {
+	URL  string `json:"url"`
+	Kind string `json:"kind"`
 }
 
 // +genclient

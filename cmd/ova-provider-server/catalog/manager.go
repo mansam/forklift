@@ -16,42 +16,62 @@ import (
 
 	liberr "github.com/kubev2v/forklift/pkg/lib/error"
 	"github.com/kubev2v/forklift/pkg/lib/logging"
+	"gopkg.in/yaml.v2"
 )
 
 const (
 	DownloadFilename  = "vm.ova.incomplete"
 	ApplianceFilename = "vm.ova"
+	StatusPending     = "Pending"
+	StatusInProgress  = "InProgress"
+	StatusComplete    = "Complete"
+	StatusError       = "Error"
 )
 
-type OVAConfig struct {
-	Sources []Source `yaml:"sources"`
+type ApplianceSource struct {
+	URL  string `yaml:"url"`
+	Kind string `yaml:"kind"`
 }
 
-type Source struct {
-	URL string `yaml:"url"`
-}
-
-func New(catalogPath string, configPath string, scanInterval int, prune bool, concurrent int) (m *Manager, err error) {
+func New(catalogPath string, sourcesPath string, scanInterval int, prune bool, concurrent int) (m *Manager, err error) {
 	m = &Manager{
 		CatalogPath:            catalogPath,
-		ConfigPath:             configPath,
+		SourcePath:             sourcesPath,
 		ScanInterval:           scanInterval,
 		Prune:                  prune,
 		MaxConcurrentDownloads: concurrent,
+		statuses:               make(map[string]ApplianceStatus),
 	}
 	m.Log = logging.WithName("catalog")
 	return
+}
+
+type ApplianceStatus struct {
+	Modified *time.Time `json:"modified"`
+	Status   string     `json:"status"`
+	URL      string     `json:"url"`
+	Error    error      `json:"error,omitempty"`
+	Progress float32    `json:"progress"`
+	Size     int64      `json:"size"`
 }
 
 type Manager struct {
 	Context                context.Context
 	Log                    logging.LevelLogger
 	CatalogPath            string
-	ConfigPath             string
+	SourcePath             string
 	ScanInterval           int
-	Config                 OVAConfig
+	Sources                []ApplianceSource
 	Prune                  bool
 	MaxConcurrentDownloads int
+	statuses               map[string]ApplianceStatus
+	statusMutex            sync.RWMutex
+}
+
+func (m *Manager) GetStatuses() map[string]ApplianceStatus {
+	m.statusMutex.RLock()
+	defer m.statusMutex.RUnlock()
+	return m.statuses
 }
 
 func (m *Manager) Run(ctx context.Context) (err error) {
@@ -76,7 +96,7 @@ func (m *Manager) Run(ctx context.Context) (err error) {
 func (m *Manager) reconcile() (done bool) {
 	err := m.config()
 	if err != nil {
-		m.Log.Error(err, "failed to load provider config", "path", m.ConfigPath)
+		m.Log.Error(err, "failed to load provider config", "path", m.SourcePath)
 		if errors.Is(err, &os.PathError{}) {
 			// if the file contains invalid yaml it could be fixed
 			// by a configmap update, but a filesystem error suggests
@@ -96,15 +116,19 @@ func (m *Manager) reconcile() (done bool) {
 	}
 
 	wg := NewQueuingWaitGroup(m.MaxConcurrentDownloads)
-	for _, source := range m.Config.Sources {
+	for _, source := range m.Sources {
 		url := source.URL
-		if !m.present(url) {
+		if m.present(url) {
+			m.markComplete(url)
+		} else {
+			m.markPending(url)
 			wg.Add()
 			go func() {
 				defer wg.Done()
 				err = m.download(url)
 				if err != nil {
 					m.Log.Error(err, "failed to download appliance", "url", url)
+					m.markError(url, err)
 					if !errors.Is(err, &os.PathError{}) {
 						err = m.remove(url)
 						if err != nil {
@@ -120,13 +144,26 @@ func (m *Manager) reconcile() (done bool) {
 }
 
 func (m *Manager) config() (err error) {
-	m.Config, err = ReadConfig(m.ConfigPath)
+	file, err := os.Open(m.SourcePath)
+	if err != nil {
+		err = liberr.Wrap(err)
+		return
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+	decoder := yaml.NewDecoder(file)
+	err = decoder.Decode(&m.Sources)
+	if err != nil {
+		err = liberr.Wrap(err)
+		return
+	}
 	return
 }
 
 func (m *Manager) prune() error {
 	remoteAppliances := make(map[string]bool)
-	for _, source := range m.Config.Sources {
+	for _, source := range m.Sources {
 		url := source.URL
 		remoteAppliances[string2hash(url)] = true
 	}
@@ -190,11 +227,12 @@ func (m *Manager) download(url string) (err error) {
 		return
 	}
 
-	reader := LoggingReader{
-		Log:           logging.WithName("download"),
+	m.markInProgress(url, response.ContentLength, 0)
+	reader := ProgressReader{
 		Source:        url,
 		Reader:        response.Body,
 		ContentLength: response.ContentLength,
+		ProgressFunc:  m.markInProgress,
 	}
 	_, err = io.Copy(file, &reader)
 	if err != nil {
@@ -238,62 +276,69 @@ func (m *Manager) present(url string) bool {
 	return true
 }
 
-func NewQueuingWaitGroup(limit int) *QueuingWaitGroup {
-	q := &QueuingWaitGroup{}
-	q.Reset(limit)
-	return q
-}
-
-type QueuingWaitGroup struct {
-	limit chan int
-	wg    sync.WaitGroup
-}
-
-func (r *QueuingWaitGroup) Reset(limit int) {
-	r.limit = make(chan int, limit)
-	r.wg = sync.WaitGroup{}
-}
-
-func (r *QueuingWaitGroup) Add() {
-	r.limit <- 1
-	r.wg.Add(1)
-}
-
-func (r *QueuingWaitGroup) Done() {
-	<-r.limit
-	r.wg.Done()
-}
-
-func (r *QueuingWaitGroup) Wait() {
-	r.wg.Wait()
-}
-
-type LoggingReader struct {
-	io.Reader
-	Log           logging.LevelLogger
-	ContentLength int64
-	Source        string
-	BytesRead     int64
-}
-
-func (r *LoggingReader) Read(p []byte) (n int, err error) {
-	n, err = r.Reader.Read(p)
+func (m *Manager) markComplete(url string) {
+	m.statusMutex.Lock()
+	defer m.statusMutex.Unlock()
+	dir := m.applianceDir(url)
+	filepath := path.Join(dir, ApplianceFilename)
+	info, err := os.Stat(filepath)
 	if err != nil {
+		m.markError(url, err)
 		return
 	}
-	r.BytesRead += int64(n)
-	r.Log.V(10).Info("Read progress.", "source", r.Source, "size", r.ContentLength, "read", r.BytesRead)
-	return
+	modified := info.ModTime()
+	m.statuses[url] = ApplianceStatus{
+		Status:   StatusComplete,
+		URL:      url,
+		Error:    nil,
+		Progress: 1,
+		Modified: &modified,
+		Size:     info.Size(),
+	}
+}
+
+func (m *Manager) markError(url string, err error) {
+	m.statusMutex.Lock()
+	defer m.statusMutex.Unlock()
+	m.statuses[url] = ApplianceStatus{
+		Status:   StatusError,
+		URL:      url,
+		Error:    err,
+		Progress: 0,
+		Size:     0,
+	}
+}
+
+func (m *Manager) markPending(url string) {
+	m.statusMutex.Lock()
+	defer m.statusMutex.Unlock()
+	if m.statuses[url].Status == "" {
+		m.statuses[url] = ApplianceStatus{
+			Status: StatusPending,
+			URL:    url,
+			Error:  nil,
+		}
+	}
+}
+
+func (m *Manager) markInProgress(url string, length int64, read int64) {
+	m.statusMutex.Lock()
+	defer m.statusMutex.Unlock()
+	var progress float32
+	if length > 0 {
+		progress = float32(read) / float32(length)
+	}
+	m.statuses[url] = ApplianceStatus{
+		Status:   StatusInProgress,
+		URL:      url,
+		Error:    nil,
+		Progress: progress,
+		Size:     read,
+	}
 }
 
 func string2hash(s string) string {
 	h := sha256.New()
 	_, _ = h.Write([]byte(s))
 	return hex.EncodeToString(h.Sum(nil))
-}
-
-func complete(path string, url string) (n int, done bool) {
-	hash := string2hash(url)
-	return path.Join(m.CatalogPath, hash)
-	return
 }
