@@ -2,7 +2,11 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	liburl "net/url"
 	"os"
 	"strings"
 
@@ -311,4 +315,53 @@ func (r *Reconciler) isEnforcedRestrictionNamespace(namespaceName string) bool {
 	auditLabel, auditExists := ns.Labels[auditRestrictedLabel]
 
 	return enforceExists && enforceLabel == "restricted" && !(auditExists && auditLabel == "restricted")
+}
+
+func (r *Reconciler) applianceStatus(provider *api.Provider) (err error) {
+	if provider.Type() != api.Ova {
+		return
+	}
+	svc := fmt.Sprintf("ova-service-%s.%s.svc.cluster.local:8080", provider.Name, provider.Namespace)
+	url := liburl.URL{
+		Scheme: "http",
+		Host:   svc,
+		Path:   "/status",
+	}
+	response, err := http.Get(url.String())
+	if err != nil {
+		err = liberr.Wrap(err, "Getting OVA catalog status failed.", "provider", provider.Name)
+		return
+	}
+	defer func() {
+		_ = response.Body.Close()
+	}()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		err = liberr.Wrap(
+			err,
+			"Reading OVA catalog status failed.",
+			"provider",
+			provider.Name,
+		)
+		return
+	}
+	if response.StatusCode != http.StatusOK {
+		err = liberr.New(
+			fmt.Sprintf("OVA catalog returned unexpected status: %d", response.StatusCode),
+			"provider", provider.Name,
+			"url", url.String(),
+		)
+		return
+	}
+	provider.Status.Appliances = nil
+	err = json.Unmarshal(body, &provider.Status.Appliances)
+	if err != nil {
+		err = liberr.Wrap(
+			err,
+			"Unmarshalling OVA catalog status failed.",
+			"provider",
+			provider.Name)
+		return
+	}
+	return
 }

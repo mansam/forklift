@@ -101,6 +101,21 @@ type ProviderStatus struct {
 	// Fingerprint.
 	// +optional
 	Fingerprint string `json:"fingerprint,omitempty"`
+	// Status of appliances for OVA provider.
+	// +optional
+	Appliances []ApplianceStatus `json:"appliances,omitempty"`
+}
+
+// ApplianceStatus defines the status of an appliance that
+// the OVA provider server has been requested to download
+// and store in its catalog.
+type ApplianceStatus struct {
+	Modified *meta.Time `json:"modified,omitempty"`
+	Status   string     `json:"status"`
+	URL      string     `json:"url"`
+	Error    string     `json:"error,omitempty"`
+	Progress int64      `json:"progress"`
+	Size     int64      `json:"size"`
 }
 
 // Source defines a remote VM source for the provider.

@@ -6,7 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const Collection = "/catalog"
+const Collection = "/status"
 
 type Handler struct {
 	Manager *Manager
