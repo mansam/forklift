@@ -432,8 +432,8 @@ func (r *LiveMigrator) ExecutePhase(vm *planapi.VMStatus) (ok bool, err error) {
 			break
 		}
 		if required {
-			var instancetype *instancetype.VirtualMachineInstancetype
-			instancetype, err = r.builder.LocalInstanceType(vm)
+			var it *instancetype.VirtualMachineInstancetype
+			it, err = r.builder.LocalInstanceType(vm)
 			if err != nil {
 				if !errors.As(err, &web.ProviderNotReadyError{}) {
 					r.Log.Error(err, "error building InstanceType", "vm", vm.Name)
@@ -442,7 +442,7 @@ func (r *LiveMigrator) ExecutePhase(vm *planapi.VMStatus) (ok bool, err error) {
 				}
 				break
 			}
-			err = r.ensurer.EnsureLocalInstanceType(vm, instancetype)
+			err = r.ensurer.EnsureLocalInstanceType(vm, it)
 			if err != nil {
 				if !errors.As(err, &web.ProviderNotReadyError{}) {
 					r.Log.Error(err, "error ensuring InstanceType", "vm", vm.Name)
