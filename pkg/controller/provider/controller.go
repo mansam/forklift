@@ -365,7 +365,7 @@ func (r *Reconciler) updateContainer(provider *api.Provider) (err error) {
 	}
 
 	collector := container.Build(db, provider, secret)
-	err = r.container.Add(collector)
+	_, _, err = r.container.Replace(collector)
 	if err != nil {
 		return
 	}
