@@ -69,6 +69,7 @@ func main() {
 	if p := profiler(); p != nil {
 		defer p.Stop()
 	}
+	log.Info("MTV-6213 debug image")
 
 	// Start prometheus metrics HTTP handler
 	log.Info("setting up prometheus endpoint :2112/metrics")

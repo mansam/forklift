@@ -336,22 +336,22 @@ func (r *StorageMap) FindStorageByName(storageName string) (pair StoragePair, fo
 // against the destination cluster, is a NetApp Shift/Trident class. Unique class names are
 // queried at most once. When c is nil or the map is nil, returns (false, nil).
 func (r *StorageMap) HasNetAppShiftDestination(c k8sclient.Client) (bool, error) {
-	if c == nil || r == nil {
-		return false, nil
-	}
-	for _, pair := range r.Spec.Map {
-		name := pair.Destination.StorageClass
-		if name == "" {
-			continue
-		}
-		shift, err := pair.Destination.IsNetAppShiftStorageClass(c)
-		if err != nil {
-			return false, err
-		}
-		if shift {
-			return true, nil
-		}
-	}
+	//if c == nil || r == nil {
+	//	return false, nil
+	//}
+	//for _, pair := range r.Spec.Map {
+	//	name := pair.Destination.StorageClass
+	//	if name == "" {
+	//		continue
+	//	}
+	//	shift, err := pair.Destination.IsNetAppShiftStorageClass(c)
+	//	if err != nil {
+	//		return false, err
+	//	}
+	//	if shift {
+	//		return true, nil
+	//	}
+	//}
 	return false, nil
 }
 
